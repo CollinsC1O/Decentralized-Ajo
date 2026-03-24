@@ -5,10 +5,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Users, PlusCircle, Wallet, TrendingUp, CircleDot, ArrowRight, Search, SlidersHorizontal } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CircleList } from '@/components/dashboard/circle-list';
+import { Users, PlusCircle, Wallet, TrendingUp, CircleDot, ArrowRight } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { authenticatedFetch } from '@/lib/auth-client';
 
 interface Circle {
   id: string;
@@ -44,37 +43,13 @@ export default function Home() {
       const userData = JSON.parse(user);
       setUserName(userData.firstName || userData.email);
     }
+
+    fetchCircles();
   }, []);
 
-  // Debouncing Search Query
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchQuery(searchQuery);
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-  // Fetch Circles when filters change
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token && isAuthenticated) {
-      fetchCircles(token, debouncedSearchQuery, statusFilter);
-    }
-  }, [debouncedSearchQuery, statusFilter, isAuthenticated]);
-
-  const fetchCircles = async (token: string, search: string = '', status: string = 'ALL') => {
-    setLoading(true);
+  const fetchCircles = async () => {
     try {
-      const url = new URL('/api/circles', window.location.origin);
-      if (search) url.searchParams.append('search', search);
-      if (status && status !== 'ALL') url.searchParams.append('status', status);
-
-      const response = await fetch(url.toString(), {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await authenticatedFetch('/api/circles');
       if (response.ok) {
         const data = await response.json();
         setCircles(data.circles || []);
@@ -199,7 +174,8 @@ function LandingPage() {
             <CircleDot className="h-8 w-8 text-primary" />
             <span className="text-xl font-bold text-foreground">Stellar Ajo</span>
           </div>
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center">
+            <ThemeToggle />
             <Button variant="outline" onClick={() => router.push('/auth/login')}>
               Sign In
             </Button>
