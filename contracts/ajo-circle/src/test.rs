@@ -19,8 +19,7 @@ fn setup() -> (Env, Address, AjoCircleClient<'static>) {
 #[test]
 fn test_initialize_emits_event() {
     let (env, organizer, client) = setup();
-
-    client.initialize_circle(&organizer, &100, &7, &4);
+    client.initialize_circle(&organizer, &100, &7, &4, &0);
 
     let events = env.events().all();
     assert!(!events.is_empty());
@@ -36,12 +35,12 @@ fn test_initialize_emits_event() {
 }
 
 #[test]
-fn test_add_member_emits_event() {
+fn test_join_circle_emits_event() {
     let (env, organizer, client) = setup();
     let member = Address::generate(&env);
 
-    client.initialize_circle(&organizer, &100, &7, &4);
-    client.add_member(&organizer, &member);
+    client.initialize_circle(&organizer, &100, &7, &4, &0);
+    client.join_circle(&organizer, &member);
 
     let events = env.events().all();
     let last = events.last().unwrap();
@@ -56,8 +55,7 @@ fn test_add_member_emits_event() {
 #[test]
 fn test_contribute_emits_event() {
     let (env, organizer, client) = setup();
-
-    client.initialize_circle(&organizer, &100, &7, &4);
+    client.initialize_circle(&organizer, &100, &7, &4, &0);
     client.contribute(&organizer, &100);
 
     let events = env.events().all();
@@ -73,8 +71,7 @@ fn test_contribute_emits_event() {
 #[test]
 fn test_claim_payout_emits_event() {
     let (env, organizer, client) = setup();
-
-    client.initialize_circle(&organizer, &100, &7, &1);
+    client.initialize_circle(&organizer, &100, &7, &1, &0);
     let payout = client.claim_payout(&organizer);
 
     let events = env.events().all();
@@ -85,4 +82,55 @@ fn test_claim_payout_emits_event() {
     let (addr, amt): (Address, i128) = last.2.into_val(&env);
     assert_eq!(addr, organizer);
     assert_eq!(amt, payout);
+}
+
+#[test]
+fn test_slash_and_disqualify() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, AjoCircle);
+    let client = AjoCircleClient::new(&env, &contract_id);
+    let organizer = Address::generate(&env);
+    let member = Address::generate(&env);
+
+    client.initialize_circle(&organizer, &100_i128, &30_u32, &5_u32, &0_u32);
+    client.join_circle(&organizer, &member);
+
+    client.slash_member(&organizer, &member);
+    client.slash_member(&organizer, &member);
+    client.slash_member(&organizer, &member);
+
+    let res = client.try_contribute(&member, &100_i128);
+    assert!(res.is_err());
+
+    let res = client.try_claim_payout(&member);
+    assert_eq!(res, Err(Ok(AjoError::Disqualified)));
+}
+
+#[test]
+fn test_grace_period_reset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, AjoCircle);
+    let client = AjoCircleClient::new(&env, &contract_id);
+    let organizer = Address::generate(&env);
+    let member = Address::generate(&env);
+
+    client.initialize_circle(&organizer, &100_i128, &30_u32, &5_u32, &0_u32);
+    client.join_circle(&organizer, &member);
+
+    client.slash_member(&organizer, &member);
+    client.slash_member(&organizer, &member);
+
+    client.contribute(&member, &100_i128);
+
+    client.slash_member(&organizer, &member);
+    client.slash_member(&organizer, &member);
+
+    client.contribute(&member, &100_i128);
+
+    let payout = client.claim_payout(&member);
+    assert_eq!(payout, 200);
+}
+
 }
