@@ -8,6 +8,9 @@ pub mod factory;
 #[cfg(test)]
 mod deposit_tests;
 
+#[cfg(test)]
+mod withdrawal_tests;
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype,
     symbol_short, token, Address, Env, Map, Vec, Symbol
