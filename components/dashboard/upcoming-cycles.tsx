@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Calendar, Clock, ArrowRight } from 'lucide-react';
 import { authenticatedFetch } from '@/lib/auth-client';
 import { formatDistanceToNow, addDays } from 'date-fns';
+import { NoUpcomingCyclesEmpty } from '@/components/ui/empty-states';
 
 interface Circle {
   id: string;
@@ -71,9 +72,7 @@ export function UpcomingCycles() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground text-center py-4">
-            No active circles with upcoming cycles.
-          </p>
+          <NoUpcomingCyclesEmpty />
         </CardContent>
       </Card>
     );

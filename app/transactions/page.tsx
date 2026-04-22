@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowLeft } from 'lucide-react';
 import { TransactionTable, type Transaction } from '@/components/transaction-table';
 import { authenticatedFetch } from '@/lib/auth-client';
+import { NoTransactionsEmpty } from '@/components/ui/empty-states';
 
 export default function TransactionsPage() {
   const router = useRouter();
@@ -79,12 +80,7 @@ export default function TransactionsPage() {
       {loading ? (
         <div className="text-center py-16 text-muted-foreground">Loading…</div>
       ) : transactions.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <p className="text-lg">No transactions yet</p>
-          <p className="text-sm mt-1">
-            Your contributions will appear here once you join a circle.
-          </p>
-        </div>
+        <NoTransactionsEmpty />
       ) : (
         <>
           <div className="rounded-md border">
