@@ -912,7 +912,7 @@ impl AjoCircle {
     pub fn get_fee_config(env: Env) -> Option<FeeConfig> {
         env.storage().instance().get(&DataKey::FeeConfig)
     }
-}
+
     /// Calculate 10^exp with overflow checking
     ///
     /// # Arguments
