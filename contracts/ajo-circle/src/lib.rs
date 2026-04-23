@@ -19,8 +19,8 @@ use soroban_sdk::{
     Symbol, Vec, BytesN,
 };
 
-extern crate alloc;
-use alloc::vec::Vec as RustVec;
+
+
 
 pub const MAX_MEMBERS: u32 = 50;
     pub const HARD_CAP: u32 = 100;
