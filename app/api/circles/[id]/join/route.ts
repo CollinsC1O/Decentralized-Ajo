@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { applyRateLimit } from '@/lib/api-helpers';
+import { applyRateLimit, validateId } from '@/lib/api-helpers';
 import { RATE_LIMITS } from '@/lib/rate-limit';
 import { createChildLogger } from '@/lib/logger';
 
@@ -22,6 +22,8 @@ export async function GET(
 
   try {
     const { id } = await params;
+    const idError = validateId(request, id);
+    if (idError) return idError;
 
     const circle = await prisma.circle.findUnique({
       where: { id },
@@ -67,6 +69,8 @@ export async function POST(
 
   try {
     const { id } = await params;
+    const idError = validateId(request, id);
+    if (idError) return idError;
 
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },

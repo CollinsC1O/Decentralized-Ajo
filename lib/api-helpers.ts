@@ -22,6 +22,17 @@ export function errorResponse(
   return res;
 }
 
+/** Validate a route ID parameter; returns a 404 response if invalid. */
+export function validateId(
+  request: NextRequest,
+  id: string | undefined,
+): NextResponse | null {
+  if (!id || typeof id !== 'string' || id.trim().length === 0) {
+    return errorResponse(request, { code: 'not_found', message: 'Circle not found' }, 404);
+  }
+  return null;
+}
+
 /** Parse and validate a request body against a Zod schema. */
 export async function validateBody<T>(
   request: NextRequest,

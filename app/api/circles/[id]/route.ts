@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { validateBody, applyRateLimit, errorResponse } from '@/lib/api-helpers';
+import { validateBody, applyRateLimit, errorResponse, validateId } from '@/lib/api-helpers';
 import { UpdateCircleSchema } from '@/lib/validations/circle';
 import type { UpdateCircleInput } from '@/lib/validations/circle';
 import { RATE_LIMITS } from '@/lib/rate-limit';
@@ -24,6 +24,8 @@ export async function GET(
 
   try {
     const { id } = await params;
+    const idError = validateId(request, id);
+    if (idError) return idError;
 
     const circle = await prisma.circle.findUnique({
       where: { id },
@@ -81,6 +83,8 @@ export async function PUT(
 
   try {
     const { id } = await params;
+    const idError = validateId(request, id);
+    if (idError) return idError;
 
     const circle = await prisma.circle.findUnique({ where: { id } });
     if (!circle) return errorResponse(request, { code: 'not_found', message: 'Circle not found' }, 404);

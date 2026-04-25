@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { errorResponse } from '@/lib/api-helpers';
+import { errorResponse, validateId } from '@/lib/api-helpers';
 import { createChildLogger } from '@/lib/logger';
 
 const logger = createChildLogger({ service: 'api', route: '/api/circles/[id]/export' });
@@ -18,6 +18,8 @@ export async function GET(
 
   try {
     const { id } = await params;
+    const idError = validateId(request, id);
+    if (idError) return idError;
 
     const circle = await prisma.circle.findUnique({
       where: { id },
