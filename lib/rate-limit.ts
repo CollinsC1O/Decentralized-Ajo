@@ -1,23 +1,26 @@
 /**
- * In-memory sliding-window rate limiter.
- * For production with multiple instances, swap the store for a Redis/Upstash backend.
+ * Rate limiter with Upstash Redis (sliding window) for production
+ * and an in-memory fallback for local development.
  */
 
+import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { createChildLogger } from './logger';
 
 const logger = createChildLogger({ service: 'rate-limit' });
 
-/**
- * Shared interface for rate limit stores.
- */
+export interface RateLimitConfig {
+  /** Max requests allowed within the window */
+  limit: number;
+  /** Window duration in milliseconds */
+  windowMs: number;
+}
+
 interface RateLimitStore {
   check(key: string, config: RateLimitConfig): Promise<{ retryAfter: number } | null>;
 }
 
-/**
- * In-memory sliding-window rate limiter for local development.
- */
+/** In-memory sliding-window rate limiter for local development. */
 class MemoryStore implements RateLimitStore {
   private store = new Map<string, { count: number; resetAt: number }>();
 
@@ -40,10 +43,12 @@ class MemoryStore implements RateLimitStore {
 }
 
 /**
- * Redis-backed rate limiter for production (multi-instance).
- * Uses Upstash Redis for compatibility with serverless environments.
+ * Redis-backed rate limiter using @upstash/ratelimit sliding window.
+ * Atomic by design — no race condition between incr and expire.
  */
 class RedisStore implements RateLimitStore {
+  // Cache Ratelimit instances keyed by "limit:windowMs" to avoid recreating per request.
+  private limiters = new Map<string, Ratelimit>();
   private redis: Redis;
 
   constructor() {
@@ -53,46 +58,40 @@ class RedisStore implements RateLimitStore {
     });
   }
 
+  private getLimiter(config: RateLimitConfig): Ratelimit {
+    const cacheKey = `${config.limit}:${config.windowMs}`;
+    let limiter = this.limiters.get(cacheKey);
+    if (!limiter) {
+      limiter = new Ratelimit({
+        redis: this.redis,
+        limiter: Ratelimit.slidingWindow(config.limit, `${config.windowMs} ms`),
+        prefix: 'rl',
+      });
+      this.limiters.set(cacheKey, limiter);
+    }
+    return limiter;
+  }
+
   async check(key: string, config: RateLimitConfig): Promise<{ retryAfter: number } | null> {
-    const now = Date.now();
-    const identifier = `rl:${key}`;
-
     try {
-      // Use a pipeline or Lua script for atomic increment and expiry
-      // For simplicity with Upstash, we use a basic increment pattern
-      const count = await this.redis.incr(identifier);
-
-      if (count === 1) {
-        await this.redis.pexpire(identifier, config.windowMs);
+      const { success, reset } = await this.getLimiter(config).limit(key);
+      if (!success) {
+        const retryAfter = Math.max(0, Math.ceil((reset - Date.now()) / 1000));
+        return { retryAfter };
       }
-
-      if (count > config.limit) {
-        const pttl = await this.redis.pttl(identifier);
-        return { retryAfter: Math.max(0, Math.ceil(pttl / 1000)) };
-      }
-
       return null;
     } catch (err) {
-      // FAIL-OPEN: If Redis is down, log the error and allow the request.
-      // This prioritizes availability over strict rate limiting.
+      // FAIL-OPEN: if Redis is unavailable, allow the request rather than blocking all users.
       logger.error('Redis rate limit error, failing open', { err, key });
       return null;
     }
   }
 }
 
-// Initialize the appropriate store based on environment variables
 const store: RateLimitStore =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
     ? new RedisStore()
     : new MemoryStore();
-
-export interface RateLimitConfig {
-  /** Max requests allowed within the window */
-  limit: number;
-  /** Window duration in milliseconds */
-  windowMs: number;
-}
 
 /** Pre-configured limits for different route groups */
 export const RATE_LIMITS = {
@@ -105,22 +104,17 @@ export const RATE_LIMITS = {
 } as const;
 
 /**
- * Returns `null` when the request is allowed, or a `{ retryAfter }` object
- * (seconds until reset) when the limit is exceeded.
- *
- * NOTE: This is now asynchronous to support Redis stores.
+ * Returns `null` when the request is allowed, or `{ retryAfter }` (seconds)
+ * when the limit is exceeded.
  */
 export async function checkRateLimit(
   key: string,
   config: RateLimitConfig,
 ): Promise<{ retryAfter: number } | null> {
-  return await store.check(key, config);
+  return store.check(key, config);
 }
 
-/**
- * Derive a rate-limit key from a NextRequest.
- * Uses the authenticated user ID when available, falls back to IP.
- */
+/** Derive a rate-limit key from a prefix and identifier (user ID or IP). */
 export function getRateLimitKey(prefix: string, identifier: string): string {
   return `${prefix}:${identifier}`;
 }
