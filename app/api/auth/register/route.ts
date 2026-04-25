@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
       logger.error('Failed to send verification email during registration', { err, userId: user.newUser.id });
     });
 
-    const token = generateToken({ userId: user.newUser.id, email: user.newUser.email });
+    const token = generateToken({ id: user.newUser.id, email: user.newUser.email });
     const refreshToken = await generateRefreshToken(user.newUser.id);
 
     const response = NextResponse.json({ success: true, user: user.newUser, token }, { status: 201 });

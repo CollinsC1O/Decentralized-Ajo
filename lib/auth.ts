@@ -8,10 +8,15 @@ const JWT_EXPIRATION = '15m';
 const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
 export const REFRESH_TOKEN_COOKIE_NAME = 'refreshToken';
 
+export type TokenType = 'user' | 'service';
+
 export interface JWTPayload {
-  userId: string;
-  email: string;
+  userId?: string; // Optional for service tokens
+  email?: string;  // Optional for service tokens
   walletAddress?: string;
+  type: TokenType;
+  scopes: string[];
+  serviceName?: string; // Only for service tokens
 }
 
 // Hash password
@@ -28,11 +33,34 @@ export async function verifyPassword(
   return bcrypt.compare(password, hashedPassword);
 }
 
-// Generate JWT token
-export function generateToken(payload: JWTPayload): string {
+// Generate JWT access token for users
+export function generateToken(user: { id: string; email: string; walletAddress?: string | null }): string {
+  const payload: JWTPayload = {
+    userId: user.id,
+    email: user.email,
+    walletAddress: user.walletAddress || undefined,
+    type: 'user',
+    scopes: ['user:base'], // Default scope for all registered users
+  };
+
   return jwt.sign(payload, JWT_SECRET, {
     expiresIn: JWT_EXPIRATION,
   });
+}
+
+/**
+ * Generate a long-lived service token for internal sub-services.
+ * Service tokens are stateless and authorized via specific scopes.
+ */
+export function generateServiceToken(serviceName: string, scopes: string[]): string {
+  const payload: JWTPayload = {
+    serviceName,
+    type: 'service',
+    scopes,
+  };
+
+  // Service tokens are usually long-lived or non-expiring for internal use
+  return jwt.sign(payload, JWT_SECRET);
 }
 
 export function getRefreshTokenExpiryDate(): Date {
