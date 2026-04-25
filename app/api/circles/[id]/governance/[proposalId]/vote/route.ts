@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { validateBody, applyRateLimit } from '@/lib/api-helpers';
+import { validateBody, applyRateLimit, validateId } from '@/lib/api-helpers';
 import { CastVoteSchema } from '@/lib/validations/governance';
 import type { CastVoteInput } from '@/lib/validations/governance';
 import { RATE_LIMITS } from '@/lib/rate-limit';
@@ -28,6 +28,8 @@ export async function POST(
 
   try {
     const { id: circleId, proposalId } = await params;
+    const idError = validateId(request, circleId);
+    if (idError) return idError;
 
     // Verify circle and membership
     const circle = await prisma.circle.findUnique({

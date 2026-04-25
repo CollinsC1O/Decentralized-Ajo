@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { validateBody, applyRateLimit } from '@/lib/api-helpers';
+import { validateBody, applyRateLimit, validateId } from '@/lib/api-helpers';
 import { CreateProposalSchema } from '@/lib/validations/governance';
 import type { CreateProposalInput } from '@/lib/validations/governance';
 import { RATE_LIMITS } from '@/lib/rate-limit';
@@ -24,6 +24,8 @@ export async function GET(
 
   try {
     const { id: circleId } = await params;
+    const idError = validateId(request, circleId);
+    if (idError) return idError;
 
     // Verify circle exists and user has access
     const circle = await prisma.circle.findUnique({
@@ -110,6 +112,8 @@ export async function POST(
 
   try {
     const { id: circleId } = await params;
+    const idError = validateId(request, circleId);
+    if (idError) return idError;
 
     // Verify circle exists and user is a member
     const circle = await prisma.circle.findUnique({

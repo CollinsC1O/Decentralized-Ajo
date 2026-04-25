@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { applyRateLimit } from '@/lib/api-helpers';
+import { applyRateLimit, validateId } from '@/lib/api-helpers';
 import { RATE_LIMITS } from '@/lib/rate-limit';
 import { createChildLogger } from '@/lib/logger';
 
@@ -22,6 +22,8 @@ export async function POST(
 
   try {
     const { id: circleId } = await params;
+    const idError = validateId(request, circleId);
+    if (idError) return idError;
 
     // Verify circle exists and user is organizer
     const circle = await prisma.circle.findUnique({

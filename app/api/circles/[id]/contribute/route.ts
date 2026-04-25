@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { validateBody, applyRateLimit } from '@/lib/api-helpers';
+import { validateBody, applyRateLimit, validateId } from '@/lib/api-helpers';
 import { ContributeSchema, MIN_CONTRIBUTION_AMOUNT, MAX_CONTRIBUTION_AMOUNT } from '@/lib/validations/circle';
 import { RATE_LIMITS } from '@/lib/rate-limit';
 import { sendContributionReminder, sendPayoutAlert } from '@/lib/email';
@@ -27,6 +27,8 @@ export async function POST(
 
   try {
     const { id } = await params;
+    const idError = validateId(request, id);
+    if (idError) return idError;
 
     const circle = await prisma.circle.findUnique({ where: { id } });
     if (!circle) return NextResponse.json({ error: 'Circle not found' }, { status: 404 });
