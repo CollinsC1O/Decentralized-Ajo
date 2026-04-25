@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ZodSchema, ZodError } from 'zod';
 import { checkRateLimit, getRateLimitKey, RateLimitConfig } from './rate-limit';
+import { extractToken, verifyToken, JWTPayload } from './auth';
 
 export type ErrorEnvelope = {
   code: string;
@@ -86,4 +87,57 @@ export async function applyRateLimit(
   }
 
   return null;
+}
+
+/**
+ * Validates the JWT from the Authorization header and checks if it contains
+ * all the required scopes. Supports both user and service tokens.
+ */
+export async function authorize(
+  request: NextRequest,
+  requiredScopes: string[] = [],
+): Promise<{ payload: JWTPayload; error: null } | { payload: null; error: NextResponse }> {
+  const token = extractToken(request.headers.get('authorization'));
+  if (!token) {
+    return {
+      payload: null,
+      error: errorResponse(
+        request,
+        { code: 'unauthorized', message: 'Missing authorization token' },
+        401,
+      ),
+    };
+  }
+
+  const payload = verifyToken(token);
+  if (!payload) {
+    return {
+      payload: null,
+      error: errorResponse(
+        request,
+        { code: 'unauthorized', message: 'Invalid or expired token' },
+        401,
+      ),
+    };
+  }
+
+  // Scope validation
+  if (requiredScopes.length > 0) {
+    const hasAllScopes = requiredScopes.every((scope) =>
+      payload.scopes.includes(scope),
+    );
+
+    if (!hasAllScopes) {
+      return {
+        payload: null,
+        error: errorResponse(
+          request,
+          { code: 'forbidden', message: 'Insufficient permissions (missing required scopes)' },
+          403,
+        ),
+      };
+    }
+  }
+
+  return { payload, error: null };
 }

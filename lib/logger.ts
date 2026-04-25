@@ -40,9 +40,12 @@ function buildServerLogger() {
   if (!isNodeServer) return consoleShim;
 
   try {
-    // Use plain 'fs' / 'path' — Webpack handles these via the fallback map.
-    // Do NOT use the 'node:' prefix here; Webpack 5 cannot handle that scheme
-    // in client-side (or edge) bundles.
+    // In ESM environments (like standard Node with "type": "module"), 'require' is not defined.
+    // We must check for its existence before attempting to use it for Winston.
+    if (typeof require === 'undefined') {
+      return consoleShim;
+    }
+
     const fs = require('fs');
     const path = require('path');
     const winston = require('winston');

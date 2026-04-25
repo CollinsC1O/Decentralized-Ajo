@@ -81,10 +81,28 @@ export async function POST(request: NextRequest) {
       logger.error('Failed to send verification email during registration', { err, userId: user.newUser.id });
     });
 
+<<<<<<< HEAD
+    const token = generateToken({ id: user.newUser.id, email: user.newUser.email });
+    const refreshToken = await generateRefreshToken(user.newUser.id);
+
+    const response = NextResponse.json({ success: true, user: user.newUser, token }, { status: 201 });
+    response.cookies.set({
+      name: REFRESH_TOKEN_COOKIE_NAME,
+      value: refreshToken,
+      httpOnly: true,
+      secure: isSecureCookieEnvironment(),
+      sameSite: 'lax',
+      path: '/',
+      expires: getRefreshTokenExpiryDate(),
+    });
+
+    return response;
+=======
     return NextResponse.json(
       { success: true, message: 'Registration successful. Please check your email to verify your account.' },
       { status: 201 },
     );
+>>>>>>> 932e4c2692f0d371731d3705d0491dbb632eda70
   } catch (err) {
     logger.error('Registration error', { err });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

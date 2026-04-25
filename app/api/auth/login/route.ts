@@ -61,9 +61,9 @@ export async function POST(request: NextRequest) {
     }
 
     const token = generateToken({
-      userId: user.id,
+      id: user.id,
       email: user.email,
-      walletAddress: user.walletAddress || undefined,
+      walletAddress: user.walletAddress,
     });
     const refreshToken = await generateRefreshToken(user.id);
 
