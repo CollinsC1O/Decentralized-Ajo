@@ -4,6 +4,8 @@ import { verifyToken, extractToken } from '@/lib/auth';
 import { applyRateLimit, validateId } from '@/lib/api-helpers';
 import { RATE_LIMITS } from '@/lib/rate-limit';
 import { createChildLogger } from '@/lib/logger';
+import { cacheInvalidatePrefix } from '@/lib/cache';
+import { MAX_MEMBERS } from '@/lib/validations/circle';
 
 const logger = createChildLogger({ service: 'api', route: '/api/circles/[id]/join' });
 
@@ -104,8 +106,8 @@ export async function POST(
 
     if (circle.members.length >= MAX_MEMBERS) {
       return NextResponse.json(
-        { error: `Circle has reached the maximum of ${MAX_MEMBERS} members` },
-        { status: 403 }
+        { error: 'CircleAtCapacity', message: `Circle has reached the maximum of ${MAX_MEMBERS} members` },
+        { status: 409 },
       );
     }
 
@@ -115,9 +117,10 @@ export async function POST(
         userId: payload.userId,
         rotationOrder: circle.members.length + 1,
       },
-    // Bust detail cache so the new member count is reflected immediately
-    invalidatePrefix(`circles:detail:${id}`);
-    invalidatePrefix(`circles:list:${payload.userId}`);
+    });
+
+    cacheInvalidatePrefix(`circles:detail:${id}`);
+    cacheInvalidatePrefix(`circles:list:${payload.userId}`);
 
     return NextResponse.json({ success: true, member: newMember }, { status: 201 });
   } catch (err) {
