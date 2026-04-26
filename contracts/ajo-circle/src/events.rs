@@ -178,6 +178,15 @@ pub struct MemberRemovedEvent {
     pub timestamp: u64,
 }
 
+/// Circle closed event data
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CircleClosedEvent {
+    pub closed_by: Address,
+    pub residual_distributed: i128,
+    pub timestamp: u64,
+}
+
 // ============================================================================
 // EVENT EMISSION HELPERS
 // ============================================================================
@@ -315,6 +324,14 @@ pub fn emit_fee_config(env: &Env, data: &FeeConfigEvent) {
 pub fn emit_member_removed(env: &Env, data: &MemberRemovedEvent) {
     env.events().publish(
         (TOPIC_MEMBER, symbol_short!("remove"), data.member.clone()),
+        data.clone(),
+    );
+}
+
+/// Emit circle closed event
+pub fn emit_circle_closed(env: &Env, data: &CircleClosedEvent) {
+    env.events().publish(
+        (TOPIC_CIRCLE, symbol_short!("closed"), data.closed_by.clone()),
         data.clone(),
     );
 }

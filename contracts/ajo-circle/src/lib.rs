@@ -31,12 +31,12 @@ use soroban_sdk::{
 use crate::events::{
     CircleInitEvent, MemberEvent, ContributionEvent, WithdrawalEvent,
     PartialWithdrawalEvent, EmergencyRefundEvent, VoteEvent, DissolutionEvent,
-    StatusChangeEvent, RoleEvent, FeeConfigEvent, MemberRemovedEvent,
+    StatusChangeEvent, RoleEvent, FeeConfigEvent, MemberRemovedEvent, CircleClosedEvent,
     emit_circle_initialized, emit_member_added, emit_contribution, emit_deposit,
     emit_payout, emit_partial_withdrawal, emit_emergency_refund,
     emit_dissolution_started, emit_dissolution_passed, emit_vote_cast,
     emit_panic, emit_resume, emit_role_granted, emit_role_revoked,
-    emit_fee_config, emit_status_change, emit_member_removed,
+    emit_fee_config, emit_status_change, emit_member_removed, emit_circle_closed,
 };
 
 
@@ -1001,6 +1001,38 @@ impl AjoCircle {
         // Emit structured panic event (emergency)
         emit_panic(&env, &caller, env.ledger().timestamp());
         Ok(())
+    }
+
+    /// Close the circle: distribute any residual balance to the organizer (admin) and
+    /// mark the circle as Dissolved. Cleans up pool state so no funds are stranded.
+    pub fn close_circle(env: Env, admin: Address) -> Result<i128, AjoError> {
+        Self::require_admin(&env, &admin)?;
+
+        let circle: CircleData = env
+            .storage()
+            .instance()
+            .get(&DataKey::Circle)
+            .ok_or(AjoError::NotFound)?;
+
+        let residual: i128 = env.storage().instance().get(&DataKey::TotalPool).unwrap_or(0);
+
+        // Transfer any residual balance to the organizer/admin
+        if residual > 0 {
+            let token_client = token::Client::new(&env, &circle.token_address);
+            token_client.transfer(&env.current_contract_address(), &circle.organizer, &residual);
+        }
+
+        // Zero out the pool and mark circle as Dissolved
+        env.storage().instance().set(&DataKey::TotalPool, &0_i128);
+        env.storage().instance().set(&DataKey::CircleStatus, &CircleStatus::Dissolved);
+
+        emit_circle_closed(&env, &CircleClosedEvent {
+            closed_by: admin.clone(),
+            residual_distributed: residual,
+            timestamp: env.ledger().timestamp(),
+        });
+
+        Ok(residual)
     }
 
     // ---------------- ROLE MANAGEMENT ----------------
