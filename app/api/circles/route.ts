@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { applyRateLimit } from '@/lib/api-helpers';
-import { RATE_LIMITS } from '@/lib/rate-limit';
+import { redisClient } from '@/lib/redis';
 import { CircleStatus } from '@prisma/client';
+import { createChildLogger } from '@/lib/logger';
 
-// GET - List circles with pagination, filtering, and sorting
+const logger = createChildLogger({ service: 'api', route: '/api/circles' });
+
 export async function GET(request: NextRequest) {
   const token = extractToken(request.headers.get('authorization'));
   if (!token) {
@@ -17,9 +18,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
   }
 
-  const rateLimited = applyRateLimit(request, RATE_LIMITS.api, 'circles:list', payload.userId);
-  if (rateLimited) return rateLimited;
-
   try {
     // Parse and validate query params
     const { searchParams } = request.nextUrl;
@@ -28,6 +26,16 @@ export async function GET(request: NextRequest) {
     const statusParam = searchParams.get('status')?.toUpperCase();
     const durationParam = searchParams.get('duration'); // Weekly, Monthly, Quarterly
     const sortBy = searchParams.get('sortBy') || 'newest'; // newest, size_desc, size_asc, name_asc, name_desc
+    const search = searchParams.get('search')?.trim() || '';
+
+    // Create cache key from query parameters
+    const cacheParams = JSON.stringify({ page, limit, statusParam, durationParam, sortBy, search });
+    
+    // Try to get cached results first
+    const cachedResult = await redisClient.getCachedCircleList(payload.userId, cacheParams);
+    if (cachedResult) {
+      return NextResponse.json(cachedResult);
+    }
 
     // Validate status value if provided
     if (statusParam && !(statusParam in CircleStatus)) {
@@ -38,7 +46,6 @@ export async function GET(request: NextRequest) {
     }
 
     const skip = (page - 1) * limit;
-    const search = searchParams.get('search')?.trim() || '';
 
     const durationDaysMap: Record<string, number> = {
       Weekly: 7,
@@ -90,7 +97,7 @@ export async function GET(request: NextRequest) {
       orderBy = { createdAt: 'desc' }; // newest first
     }
 
-    // Run count and findMany in parallel
+    // Run optimized queries in parallel
     const [total, circles] = await Promise.all([
       prisma.circle.count({ where }),
       prisma.circle.findMany({
@@ -103,6 +110,7 @@ export async function GET(request: NextRequest) {
             select: { id: true, email: true, firstName: true, lastName: true },
           },
           members: {
+            where: { status: 'ACTIVE' }, // Only include active members
             include: {
               user: {
                 select: { id: true, email: true, firstName: true, lastName: true },
@@ -110,25 +118,28 @@ export async function GET(request: NextRequest) {
             },
           },
           contributions: {
+            where: { status: 'COMPLETED' }, // Only include completed contributions
             select: { amount: true },
           },
         },
       }),
     ]);
 
-    return NextResponse.json(
-      {
-        data: circles,
-        meta: {
-          total,
-          pages: Math.ceil(total / limit),
-          currentPage: page,
-        },
+    const result = {
+      data: circles,
+      meta: {
+        total,
+        pages: Math.ceil(total / limit),
+        currentPage: page,
       },
-      { status: 200 }
-    );
+    };
+
+    // Cache the results for 3 minutes (180 seconds)
+    await redisClient.cacheCircleList(payload.userId, cacheParams, result, 180);
+
+    return NextResponse.json(result, { status: 200 });
   } catch (error) {
-    console.error('List circles error:', error);
+    logger.error('List circles error', { err: error });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
