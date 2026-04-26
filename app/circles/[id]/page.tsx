@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/auth-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AdminPanel } from './components/admin-panel';
+import { MemberTable } from './components/MemberTable';
 
 interface Member {
   id: string;
@@ -362,47 +363,19 @@ export default function CircleDetailPage() {
 
           {/* Members Tab */}
           <TabsContent value="members">
-            <Card>
-              <CardHeader>
-                <CardTitle>Circle Members</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {circle.members.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between p-4 border border-border rounded-lg"
-                    >
-                      <div>
-                        <p className="font-semibold">
-                          {member.user.firstName} {member.user.lastName || member.user.email}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Rotation #{member.rotationOrder}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm">
-                          <span className="text-muted-foreground">Contributed: </span>
-                          <span className="font-semibold">{member.totalContributed} XLM</span>
-                        </p>
-                        {member.hasReceivedPayout && (
-                          <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
-                            Paid Out
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {isOrganizer && (
-                  <Button asChild className="mt-6 w-full">
-                    <Link href={`/circles/${circle.id}/invite`}>Invite Members</Link>
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+            <MemberTable
+              members={circle.members}
+              organizerId={circle.organizerId}
+              currentRound={circle.currentRound}
+              circleId={circle.id}
+              isOrganizer={isOrganizer}
+              onUpdate={fetchCircle}
+            />
+            {isOrganizer && (
+              <Button asChild className="mt-6 w-full">
+                <Link href={`/circles/${circle.id}/invite`}>Invite Members</Link>
+              </Button>
+            )}
           </TabsContent>
 
           {/* Contributions Tab */}
