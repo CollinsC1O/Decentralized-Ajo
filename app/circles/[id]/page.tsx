@@ -7,12 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DetailSkeleton } from '@/components/skeletons';
 import { ArrowLeft, Users, TrendingUp, Calendar, Coins } from 'lucide-react';
 import { toast } from 'sonner';
 import { authenticatedFetch } from '@/lib/auth-client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AdminPanel } from './components/admin-panel';
-import { MemberTable } from './components/MemberTable';
+import { formatAmount } from '@/lib/utils';
 
 interface Member {
   id: string;
@@ -68,28 +69,6 @@ interface Circle {
   };
 }
 
-function DetailSkeleton() {
-  return (
-    <main className="min-h-screen bg-background">
-      <header className="border-b border-border bg-card">
-        <div className="container mx-auto px-4 py-6">
-          <Skeleton className="h-4 w-32 mb-4" />
-          <Skeleton className="h-8 w-64 mb-2" />
-          <Skeleton className="h-4 w-96" />
-        </div>
-      </header>
-      <div className="container mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-32" />
-          ))}
-        </div>
-        <Skeleton className="h-96" />
-      </div>
-    </main>
-  );
-}
-
 function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (status) {
     case 'ACTIVE':
@@ -103,10 +82,6 @@ function getStatusVariant(status: string): 'default' | 'secondary' | 'destructiv
     default:
       return 'secondary';
   }
-}
-
-function formatXLM(n: number): string {
-  return Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: 7 }) : '0';
 }
 
 export default function CircleDetailPage() {
@@ -234,7 +209,7 @@ export default function CircleDetailPage() {
             </div>
             <div className="text-right">
               <p className="text-sm text-muted-foreground">Current Pot</p>
-              <p className="text-3xl font-bold text-primary">{formatXLM(totalPot)} XLM</p>
+              <p className="text-3xl font-bold text-primary">{formatAmount(totalPot)} XLM</p>
             </div>
           </div>
         </div>
@@ -264,7 +239,7 @@ export default function CircleDetailPage() {
               <TrendingUp className="h-5 w-5 text-muted-foreground" />
               <div>
                 <p className="text-sm text-muted-foreground">Per Round</p>
-                <p className="text-lg font-bold">{formatXLM(circle.contributionAmount)} XLM</p>
+                <p className="text-lg font-bold">{formatAmount(circle.contributionAmount)} XLM</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -272,7 +247,7 @@ export default function CircleDetailPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Payout</p>
                 <p className="text-lg font-bold">
-                  {formatXLM(circle.contributionAmount * circle.members.length)} XLM
+                  {formatAmount(circle.contributionAmount * circle.members.length)} XLM
                 </p>
               </div>
             </div>
@@ -363,19 +338,47 @@ export default function CircleDetailPage() {
 
           {/* Members Tab */}
           <TabsContent value="members">
-            <MemberTable
-              members={circle.members}
-              organizerId={circle.organizerId}
-              currentRound={circle.currentRound}
-              circleId={circle.id}
-              isOrganizer={isOrganizer}
-              onUpdate={fetchCircle}
-            />
-            {isOrganizer && (
-              <Button asChild className="mt-6 w-full">
-                <Link href={`/circles/${circle.id}/invite`}>Invite Members</Link>
-              </Button>
-            )}
+            <Card>
+              <CardHeader>
+                <CardTitle>Circle Members</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {circle.members.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-4 border border-border rounded-lg"
+                    >
+                      <div>
+                        <p className="font-semibold">
+                          {member.user.firstName} {member.user.lastName || member.user.email}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Rotation #{member.rotationOrder}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">Contributed: </span>
+                          <span className="font-semibold">{formatAmount(member.totalContributed)} XLM</span>
+                        </p>
+                        {member.hasReceivedPayout && (
+                          <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
+                            Paid Out
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {isOrganizer && (
+                  <Button asChild className="mt-6 w-full">
+                    <Link href={`/circles/${circle.id}/invite`}>Invite Members</Link>
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Contributions Tab */}
@@ -401,7 +404,7 @@ export default function CircleDetailPage() {
                           <p className="text-sm text-muted-foreground">Round {contribution.round}</p>
                         </div>
                         <div className="text-right">
-                          <p className="font-semibold">{contribution.amount} XLM</p>
+                          <p className="font-semibold">{formatAmount(contribution.amount)} XLM</p>
                           <p className="text-sm text-muted-foreground">{contribution.status}</p>
                         </div>
                       </div>
