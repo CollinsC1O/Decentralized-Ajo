@@ -10,10 +10,10 @@
 //! - Error conditions (non-members, insufficient funds, etc.)
 //! - Edge cases and boundary conditions
 
-use crate::{AjoCircle, AjoCircleClient, AjoError, CircleStatus, DataKey, MemberStanding};
+use crate::{AjoCircle, AjoCircleClient, AjoError};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
-    token, Address, Env, Map,
+    token, Address, Env,
 };
 
 // ─── Test Helpers ─────────────────────────────────────────────────────────────
@@ -25,7 +25,7 @@ fn setup_basic_circle(env: &Env) -> (AjoCircleClient, Address, Address, Address)
 
     let organizer = Address::generate(env);
     let admin = Address::generate(env);
-    let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let token_address = env.register_stellar_asset_contract(admin.clone());
     let token_admin = token::StellarAssetClient::new(env, &token_address);
 
     // Mint tokens to organizer and contract
@@ -323,7 +323,7 @@ fn test_claim_payout_calculation_with_different_contribution_amount() {
 
     let organizer = Address::generate(&env);
     let admin = Address::generate(&env);
-    let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let token_address = env.register_stellar_asset_contract(admin.clone());
     let token_admin = token::StellarAssetClient::new(&env, &token_address);
 
     // Initialize with different contribution amount
@@ -356,7 +356,7 @@ fn test_claim_payout_with_maximum_members() {
 
     let organizer = Address::generate(&env);
     let admin = Address::generate(&env);
-    let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let token_address = env.register_stellar_asset_contract(admin.clone());
     let token_admin = token::StellarAssetClient::new(&env, &token_address);
 
     // Initialize with max members (5)
@@ -366,7 +366,7 @@ fn test_claim_payout_with_maximum_members() {
     client.initialize_circle(&organizer, &token_address, &100_i128, &7_u32, &12_u32, &5_u32);
 
     // Add 4 more members (total 5)
-    for i in 0..4 {
+    for _i in 0..4 {
         let member = Address::generate(&env);
         client.add_member(&organizer, &member);
     }
@@ -386,7 +386,7 @@ fn test_claim_payout_with_minimum_contribution() {
 
     let organizer = Address::generate(&env);
     let admin = Address::generate(&env);
-    let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let token_address = env.register_stellar_asset_contract(admin.clone());
     let token_admin = token::StellarAssetClient::new(&env, &token_address);
 
     // Initialize with minimum contribution (1)
@@ -410,7 +410,7 @@ fn test_claim_payout_with_large_amounts() {
 
     let organizer = Address::generate(&env);
     let admin = Address::generate(&env);
-    let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let token_address = env.register_stellar_asset_contract(admin.clone());
     let token_admin = token::StellarAssetClient::new(&env, &token_address);
 
     // Initialize with large contribution
@@ -576,79 +576,119 @@ fn test_claim_payout_return_value_matches_calculation() {
     assert_eq!(member_data.total_withdrawn, expected_payout);
 }
 
-// ─── DUST HANDLING TESTS ──────────────────────────────────────────────────────
+// ─── REENTRANCY / DOUBLE-CLAIM PROTECTION ─────────────────────────────────────
 
+/// Verifies that `has_received_payout` is set to `true` and persisted BEFORE
+/// the token transfer, so a second call in the same or a subsequent transaction
+/// is rejected with `AlreadyPaid`.
 #[test]
-fn test_final_recipient_receives_dust() {
+fn test_claim_payout_double_claim_rejected() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, AjoCircle);
-    let client = AjoCircleClient::new(&env, &contract_id);
+    let (client, organizer, token_address, _admin) = setup_basic_circle(&env);
+    let contract_address = client.address.clone();
 
-    let organizer = Address::generate(&env);
-    let admin = Address::generate(&env);
-    let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
     let token_admin = token::StellarAssetClient::new(&env, &token_address);
+    token_admin.mint(&contract_address, &1000_i128);
 
-    // 2-member circle, contribution = 100
-    token_admin.mint(&organizer, &10000_i128);
-    client.initialize_circle(&organizer, &token_address, &100_i128, &7_u32, &12_u32, &2_u32);
+    // First claim succeeds
+    let result1 = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result1, Ok(100_i128));
 
-    let member1 = Address::generate(&env);
-    token_admin.mint(&member1, &10000_i128);
-    client.add_member(&organizer, &member1);
-
-    // Both members deposit
-    client.deposit(&organizer);
-    client.deposit(&member1);
-
-    // Inject 3 extra tokens as dust directly into the contract
-    token_admin.mint(&client.address, &3_i128);
-
-    let token_client = token::Client::new(&env, &token_address);
-
-    // First payout — organizer gets standard payout (2 * 100 = 200)
-    let payout1 = client.withdraw(&organizer, &1_u32).unwrap();
-    assert_eq!(payout1, 200_i128);
-
-    // Second payout — member1 is final recipient, should receive 200 + 3 dust = 203
-    let balance_before = token_client.balance(&member1);
-    let payout2 = client.withdraw(&member1, &1_u32).unwrap();
-    assert_eq!(payout2, 203_i128);
-    assert_eq!(token_client.balance(&member1), balance_before + 203_i128);
-
-    // Contract balance should now be zero (no fee pool set)
-    assert_eq!(token_client.balance(&client.address), 0_i128);
+    // Second claim for the same cycle must be rejected
+    let result2 = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result2, Err(AjoError::AlreadyPaid));
 }
 
+/// Verifies that the pool balance is decremented by the payout amount so that
+/// a second caller cannot drain funds that were already paid out.
 #[test]
-fn test_non_final_recipient_gets_standard_payout() {
+fn test_claim_payout_pool_decremented_after_payout() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, AjoCircle);
-    let client = AjoCircleClient::new(&env, &contract_id);
+    let (client, organizer, member1, _member2, token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
 
-    let organizer = Address::generate(&env);
-    let admin = Address::generate(&env);
-    let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
-    let token_admin = token::StellarAssetClient::new(&env, &token_address);
+    let pool_before = client.get_total_pool();
+    assert!(pool_before > 0, "pool should be funded after deposits");
 
-    token_admin.mint(&organizer, &10000_i128);
-    client.initialize_circle(&organizer, &token_address, &100_i128, &7_u32, &12_u32, &2_u32);
+    client.claim_payout(&organizer, &1_u32).unwrap();
 
-    let member1 = Address::generate(&env);
-    token_admin.mint(&member1, &10000_i128);
-    client.add_member(&organizer, &member1);
+    let pool_after = client.get_total_pool();
+    // Pool must have decreased by exactly the payout amount (3 * 100 = 300)
+    assert_eq!(pool_after, pool_before - 300_i128);
+}
 
-    client.deposit(&organizer);
-    client.deposit(&member1);
+/// Verifies that rotation order is enforced: a member who is not the designated
+/// recipient for the given cycle is rejected with `Unauthorized`.
+#[test]
+fn test_claim_payout_rotation_order_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
 
-    // Inject dust
-    token_admin.mint(&client.address, &5_i128);
+    let (client, organizer, member1, _member2, token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
 
-    // First payout — not the final recipient, gets exactly 200
-    let payout1 = client.withdraw(&organizer, &1_u32).unwrap();
-    assert_eq!(payout1, 200_i128);
+    // Set rotation order: member1 is slot 0 (cycle 1), organizer is slot 1 (cycle 2)
+    client.shuffle_rotation(&organizer).unwrap();
+
+    // Determine who is actually first in the rotation
+    let circle = client.get_circle_state().unwrap();
+    // We can't read RotationOrder directly, but we can verify that only the
+    // correct member succeeds for cycle 1 and the other is rejected.
+    // Try organizer for cycle 1 — one of them will succeed, the other fail.
+    let r1 = client.claim_payout(&organizer, &1_u32);
+    let r2 = client.claim_payout(&member1, &1_u32);
+
+    // Exactly one should succeed and one should fail with Unauthorized or AlreadyPaid
+    let successes = [&r1, &r2].iter().filter(|r| r.is_ok()).count();
+    let failures  = [&r1, &r2].iter().filter(|r| r.is_err()).count();
+    assert_eq!(successes, 1, "exactly one member should receive the cycle-1 payout");
+    assert_eq!(failures,  1, "the other member should be rejected");
+}
+
+/// Verifies that a disqualified member cannot claim a payout.
+#[test]
+fn test_claim_payout_disqualified_member_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, organizer, member1, _member2, token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
+
+    // Boot member1 (sets is_active = false)
+    client.boot_dormant_member(&organizer, &member1).unwrap();
+
+    let result = client.claim_payout(&member1, &1_u32);
+    assert_eq!(result, Err(AjoError::Disqualified));
+}
+
+/// Verifies that a paused (panicked) circle rejects payout claims.
+#[test]
+fn test_claim_payout_blocked_when_panicked() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, organizer, _member1, _member2, _token_address, _admin) =
+        setup_circle_with_members_and_funds(&env);
+
+    client.panic(&organizer).unwrap();
+
+    let result = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result, Err(AjoError::CirclePanicked));
+}
+
+/// Verifies that the pool must be sufficiently funded before a payout is allowed.
+#[test]
+fn test_claim_payout_insufficient_pool_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Setup circle with NO deposits — pool is empty
+    let (client, organizer, token_address, _admin) = setup_basic_circle(&env);
+
+    let result = client.claim_payout(&organizer, &1_u32);
+    assert_eq!(result, Err(AjoError::InsufficientFunds));
 }

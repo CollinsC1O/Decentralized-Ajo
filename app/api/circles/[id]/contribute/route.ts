@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyToken, extractToken } from '@/lib/auth';
-import { validateBody, applyRateLimit } from '@/lib/api-helpers';
-import { ContributeSchema } from '@/lib/validations/circle';
+import { validateBody, applyRateLimit, validateId } from '@/lib/api-helpers';
+import { ContributeSchema, MIN_CONTRIBUTION_AMOUNT, MAX_CONTRIBUTION_AMOUNT } from '@/lib/validations/circle';
 import { RATE_LIMITS } from '@/lib/rate-limit';
 import { sendContributionReminder, sendPayoutAlert } from '@/lib/email';
+import { createChildLogger } from '@/lib/logger';
+
+const logger = createChildLogger({ service: 'api', route: '/api/circles/[id]/contribute' });
 
 export async function POST(
   request: NextRequest,
@@ -16,7 +19,7 @@ export async function POST(
   const payload = verifyToken(token);
   if (!payload) return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
 
-  const rateLimited = applyRateLimit(request, RATE_LIMITS.api, 'circles:contribute', payload.userId);
+  const rateLimited = await applyRateLimit(request, RATE_LIMITS.sensitive, 'circles:contribute', payload.userId);
   if (rateLimited) return rateLimited;
 
   const { data, error } = await validateBody(request, ContributeSchema);
@@ -24,9 +27,30 @@ export async function POST(
 
   try {
     const { id } = await params;
+    const idError = validateId(request, id);
+    if (idError) return idError;
 
     const circle = await prisma.circle.findUnique({ where: { id } });
     if (!circle) return NextResponse.json({ error: 'Circle not found' }, { status: 404 });
+
+    if (
+      data.amount < MIN_CONTRIBUTION_AMOUNT ||
+      data.amount > MAX_CONTRIBUTION_AMOUNT ||
+      data.amount !== circle.contributionAmount
+    ) {
+      return NextResponse.json(
+        {
+          error: 'InvalidInput',
+          message: 'Contribution amount must exactly match the circle contribution amount',
+          details: {
+            expectedAmount: circle.contributionAmount,
+            min: MIN_CONTRIBUTION_AMOUNT,
+            max: MAX_CONTRIBUTION_AMOUNT,
+          },
+        },
+        { status: 400 },
+      );
+    }
 
     const member = await prisma.circleMember.findUnique({
       where: { circleId_userId: { circleId: id, userId: payload.userId } },
@@ -52,7 +76,6 @@ export async function POST(
       data: { totalContributed: { increment: data.amount } },
     });
 
-    // Remind all members who haven't contributed this round yet
     const allMembers = await prisma.circleMember.findMany({
       where: { circleId: id },
       include: { user: { select: { email: true, firstName: true } } },
@@ -62,14 +85,14 @@ export async function POST(
       select: { userId: true },
     });
     const contributedIds = new Set(contributedThisRound.map((c: { userId: string }) => c.userId));
+    
     for (const m of allMembers) {
       if (!contributedIds.has(m.userId)) {
-        sendContributionReminder(m.user.email, m.user.firstName, circle.contributionAmount, circle.name);
+        await sendContributionReminder(m.user.email, m.user.firstName, circle.contributionAmount, circle.name);
       }
     }
 
-    // If all members have now contributed, alert the payout recipient for this round
-    const totalContributedThisRound = contributedIds.size + 1; // +1 for current contribution
+    const totalContributedThisRound = contributedIds.size + 1;
     if (totalContributedThisRound >= allMembers.length) {
       const payoutMember = await prisma.circleMember.findFirst({
         where: { circleId: id, rotationOrder: circle.currentRound },
@@ -77,13 +100,16 @@ export async function POST(
       });
       if (payoutMember) {
         const payoutAmount = circle.contributionAmount * allMembers.length;
-        sendPayoutAlert(payoutMember.user.email, payoutMember.user.firstName, payoutAmount);
+        await sendPayoutAlert(payoutMember.user.email, payoutMember.user.firstName, payoutAmount);
       }
     }
 
+    // Bust detail cache so contribution totals are fresh
+    invalidatePrefix(`circles:detail:${id}`);
+
     return NextResponse.json({ success: true, contribution }, { status: 201 });
   } catch (err) {
-    console.error('Contribute error:', err);
+    logger.error('Contribute error', { err });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
