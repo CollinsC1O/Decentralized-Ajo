@@ -29,7 +29,7 @@ use soroban_sdk::{
     Symbol, Vec, BytesN,
 };
 use crate::events::{
-    CircleInitEvent, MemberEvent, ContributionEvent, WithdrawalEvent,
+    CircleInitEvent, MemberEvent, ContributionEvent, ContributionPayload, WithdrawalEvent,
     PartialWithdrawalEvent, EmergencyRefundEvent, VoteEvent, DissolutionEvent,
     StatusChangeEvent, RoleEvent, FeeConfigEvent, MemberRemovedEvent, CircleClosedEvent,
     emit_circle_initialized, emit_member_added, emit_contribution, emit_deposit,
