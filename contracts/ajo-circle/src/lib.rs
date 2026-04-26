@@ -18,6 +18,7 @@ use soroban_sdk::{
 
 const MAX_MEMBERS: u32 = 50;
 const HARD_CAP: u32 = 100;
+const GRACE_PERIOD: u64 = 300; // 5 minutes in seconds
 
 // ---------------- ROLE CONSTANTS (Generic AccessControl style) ----------------
 const ADMIN_ROLE: Symbol = symbol_short!("ADMIN");
@@ -568,6 +569,16 @@ impl AjoCircle {
         Ok(payout)
     }
 
+    // ---------------- GRACE PERIOD HELPER ----------------
+    fn is_on_time(env: &Env) -> bool {
+        let deadline: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RoundDeadline)
+            .unwrap_or(u64::MAX);
+        env.ledger().timestamp() <= deadline + GRACE_PERIOD
+    }
+
     // ---------------- DEPOSIT (alias for contribute with fixed amount) ----------------
     pub fn deposit(env: Env, member: Address) -> Result<(), AjoError> {
         member.require_auth();
@@ -648,9 +659,10 @@ impl AjoCircle {
         }
 
         // Emit DepositReceived event
+        let on_time = Self::is_on_time(&env);
         env.events().publish(
             (symbol_short!("deposit"), member.clone()),
-            (circle.contribution_amount, circle.current_round, env.ledger().timestamp())
+            (circle.contribution_amount, circle.current_round, env.ledger().timestamp(), on_time)
         );
 
         Ok(())
